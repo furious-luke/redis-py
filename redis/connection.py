@@ -1,11 +1,50 @@
 from __future__ import with_statement
-from distutils.version import StrictVersion
-from itertools import chain
+
 import os
 import socket
 import sys
 import threading
 import warnings
+from distutils.version import StrictVersion
+from itertools import chain
+
+from redis._compat import (
+    BytesIO,
+    Empty,
+    Full,
+    LifoQueue,
+    b,
+    basestring,
+    byte_to_chr,
+    bytes,
+    imap,
+    iteritems,
+    long,
+    nativestr,
+    parse_qs,
+    recv,
+    recv_into,
+    select,
+    unicode,
+    unquote,
+    urlparse,
+    xrange,
+)
+from redis.exceptions import (
+    AuthenticationError,
+    BusyLoadingError,
+    ConnectionError,
+    ExecAbortError,
+    InvalidResponse,
+    NoScriptError,
+    ReadOnlyError,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
+from redis.utils import HIREDIS_AVAILABLE
+
+from .timing import timing
 
 try:
     import ssl
@@ -13,23 +52,6 @@ try:
 except ImportError:
     ssl_available = False
 
-from redis._compat import (b, xrange, imap, byte_to_chr, unicode, bytes, long,
-                           BytesIO, nativestr, basestring, iteritems,
-                           LifoQueue, Empty, Full, urlparse, parse_qs,
-                           recv, recv_into, select, unquote)
-from redis.exceptions import (
-    RedisError,
-    ConnectionError,
-    TimeoutError,
-    BusyLoadingError,
-    ResponseError,
-    InvalidResponse,
-    AuthenticationError,
-    NoScriptError,
-    ExecAbortError,
-    ReadOnlyError
-)
-from redis.utils import HIREDIS_AVAILABLE
 if HIREDIS_AVAILABLE:
     import hiredis
 
@@ -550,6 +572,7 @@ class Connection(object):
             pass
         self._sock = None
 
+    @timing
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
         if not self._sock:
