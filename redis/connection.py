@@ -6,7 +6,6 @@ import socket
 import sys
 import threading
 import warnings
-import logging
 
 try:
     import ssl
@@ -58,8 +57,6 @@ SYM_CRLF = b('\r\n')
 SYM_EMPTY = b('')
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
-
-logger = logging.getLogger('redis')
 
 
 class Token(object):
@@ -1059,9 +1056,6 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
-        logger.debug('REDIS: Connecting ({}/{} available)'.format(
-            self.pool.qsize(), self.max_connections
-        ))
         connection = None
         try:
             connection = self.pool.get(block=True, timeout=self.timeout)
@@ -1085,9 +1079,6 @@ class BlockingConnectionPool(ConnectionPool):
             return
 
         # Put the connection back into the pool.
-        logger.debug('REDIS: Releasing ({}/{} available)'.format(
-            self.pool.qsize(), self.max_connections
-        ))
         try:
             self.pool.put_nowait(connection)
         except Full:
