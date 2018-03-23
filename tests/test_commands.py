@@ -10,7 +10,7 @@ from redis._compat import (unichr, u, b, ascii_letters, iteritems, iterkeys,
 from redis.client import parse_info
 from redis import exceptions
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_server_version_lt, skip_if_server_version_gte
 
 
 @pytest.fixture()
@@ -67,6 +67,14 @@ class TestRedisCommands(object):
     def test_client_setname(self, r):
         assert r.client_setname('redis_py_test')
         assert r.client_getname() == 'redis_py_test'
+
+    @skip_if_server_version_lt('2.6.9')
+    def test_client_list_after_client_setname(self, r):
+        r.client_setname('cl=i=ent')
+        clients = r.client_list()
+        assert isinstance(clients[0], dict)
+        assert 'name' in clients[0]
+        assert clients[0]['name'] == 'cl=i=ent'
 
     def test_config_get(self, r):
         data = r.config_get()
@@ -858,6 +866,17 @@ class TestRedisCommands(object):
         assert value in s
         assert r.smembers('a') == set(s) - set([value])
 
+    def test_spop_multi_value(self, r):
+        s = [b('1'), b('2'), b('3')]
+        r.sadd('a', *s)
+        values = r.spop('a', 2)
+        assert len(values) == 2
+
+        for value in values:
+            assert value in s
+
+        assert r.spop('a', 1) == list(set(s) - set(values))
+
     def test_srandmember(self, r):
         s = [b('1'), b('2'), b('3')]
         r.sadd('a', *s)
@@ -901,6 +920,8 @@ class TestRedisCommands(object):
         r.zadd('a', a1=1, a2=2, a3=3)
         assert r.zcount('a', '-inf', '+inf') == 3
         assert r.zcount('a', 1, 2) == 2
+        assert r.zcount('a', '(' + str(1), 2) == 1
+        assert r.zcount('a', 1, '(' + str(2)) == 1
         assert r.zcount('a', 10, 20) == 0
 
     def test_zincrby(self, r):
@@ -1229,6 +1250,12 @@ class TestRedisCommands(object):
         remote_vals = r.hvals('a')
         assert sorted(local_vals) == sorted(remote_vals)
 
+    @skip_if_server_version_lt('3.2.0')
+    def test_hstrlen(self, r):
+        r.hmset('a', {'1': '22', '2': '333'})
+        assert r.hstrlen('a', '1') == 2
+        assert r.hstrlen('a', '2') == 3
+
     # SORT
     def test_sort_basic(self, r):
         r.rpush('a', '3', '2', '1', '4')
@@ -1452,6 +1479,15 @@ class TestRedisCommands(object):
         assert r.geopos('barcelona', 'place1', 'place2') ==\
             [(2.19093829393386841, 41.43379028184083523),
              (2.18737632036209106, 41.40634178640635099)]
+
+    @skip_if_server_version_lt('4.0.0')
+    def test_geopos_no_value(self, r):
+        assert r.geopos('barcelona', 'place1', 'place2') == [None, None]
+
+    @skip_if_server_version_lt('3.2.0')
+    @skip_if_server_version_gte('4.0.0')
+    def test_old_geopos_no_value(self, r):
+        assert r.geopos('barcelona', 'place1', 'place2') == []
 
     @skip_if_server_version_lt('3.2.0')
     def test_georadius(self, r):

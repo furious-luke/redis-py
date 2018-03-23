@@ -43,6 +43,15 @@ Getting Started
     >>> r.get('foo')
     'bar'
 
+By default, all responses are returned as `bytes` in Python 3 and `str` in
+Python 2. The user is responsible for decoding to Python 3 strings or Python 2
+unicode objects.
+
+If **all** string responses from a client should be decoded, the user can
+specify `decode_responses=True` to `StrictRedis.__init__`. In this case, any
+Redis command that returns a string type will be decoded with the `encoding`
+specified.
+
 API Reference
 -------------
 
@@ -174,7 +183,7 @@ set_response_callback method. This method accepts two arguments: a command
 name and the callback. Callbacks added in this manner are only valid on the
 instance the callback is added to. If you want to define or override a callback
 globally, you should make a subclass of the Redis client and add your callback
-to its REDIS_CALLBACKS class dictionary.
+to its RESPONSE_CALLBACKS class dictionary.
 
 Response callbacks take at least one parameter: the response from the Redis
 server. Keyword arguments may also be accepted in order to further control
@@ -518,6 +527,22 @@ cannot be delivered. When you're finished with a PubSub object, call its
     >>> p = r.pubsub()
     >>> ...
     >>> p.close()
+
+
+The PUBSUB set of subcommands CHANNELS, NUMSUB and NUMPAT are also
+supported:
+
+.. code-block:: pycon
+
+    >>> r.pubsub_channels()
+    ['foo', 'bar']
+    >>> r.pubsub_numsub('foo', 'bar')
+    [('foo', 9001), ('bar', 42)]
+    >>> r.pubsub_numsub('baz')
+    [('baz', 0)]
+    >>> r.pubsub_numpat()
+    1204
+
 
 LUA Scripting
 ^^^^^^^^^^^^^

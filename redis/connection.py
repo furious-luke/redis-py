@@ -116,6 +116,38 @@ class Token(object):
         return self.value
 
 
+class Encoder(object):
+    "Encode strings to bytes and decode bytes to strings"
+
+    def __init__(self, encoding, encoding_errors, decode_responses):
+        self.encoding = encoding
+        self.encoding_errors = encoding_errors
+        self.decode_responses = decode_responses
+
+    def encode(self, value):
+        "Return a bytestring representation of the value"
+        if isinstance(value, Token):
+            return value.encoded_value
+        elif isinstance(value, bytes):
+            return value
+        elif isinstance(value, (int, long)):
+            value = b(str(value))
+        elif isinstance(value, float):
+            value = b(repr(value))
+        elif not isinstance(value, basestring):
+            # an object we don't know how to deal with. default to unicode()
+            value = unicode(value)
+        if isinstance(value, unicode):
+            value = value.encode(self.encoding, self.encoding_errors)
+        return value
+
+    def decode(self, value, force=False):
+        "Return a unicode string from the byte representation"
+        if (self.decode_responses or force) and isinstance(value, bytes):
+            value = value.decode(self.encoding, self.encoding_errors)
+        return value
+
+
 class BaseParser(object):
     EXCEPTION_CLASSES = {
         'ERR': {
@@ -239,10 +271,9 @@ class SocketBuffer(object):
 
 class PythonParser(BaseParser):
     "Plain Python parsing class"
-    encoding = None
-
     def __init__(self, socket_read_size):
         self.socket_read_size = socket_read_size
+        self.encoder = None
         self._sock = None
         self._buffer = None
 
@@ -256,8 +287,7 @@ class PythonParser(BaseParser):
         "Called when the socket connects"
         self._sock = connection._sock
         self._buffer = SocketBuffer(self._sock, self.socket_read_size)
-        if connection.decode_responses:
-            self.encoding = connection.encoding
+        self.encoder = connection.encoder
 
     def on_disconnect(self):
         "Called when the socket disconnects"
@@ -267,7 +297,7 @@ class PythonParser(BaseParser):
         if self._buffer is not None:
             self._buffer.close()
             self._buffer = None
-        self.encoding = None
+        self.encoder = None
 
     def can_read(self):
         return self._buffer and bool(self._buffer.length)
@@ -314,8 +344,8 @@ class PythonParser(BaseParser):
             if length == -1:
                 return None
             response = [self.read_response() for i in xrange(length)]
-        if isinstance(response, bytes) and self.encoding:
-            response = response.decode(self.encoding)
+        if isinstance(response, bytes):
+            response = self.encoder.decode(response)
         return response
 
 
@@ -346,8 +376,8 @@ class HiredisParser(BaseParser):
         if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
             kwargs['replyError'] = ResponseError
 
-        if connection.decode_responses:
-            kwargs['encoding'] = connection.encoding
+        if connection.encoder.decode_responses:
+            kwargs['encoding'] = connection.encoder.encoding
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
@@ -416,6 +446,7 @@ class HiredisParser(BaseParser):
             raise response[0]
         return response
 
+
 if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
@@ -429,7 +460,7 @@ class Connection(object):
     def __init__(self, host='localhost', port=6379, db=0, password=None,
                  socket_timeout=None, socket_connect_timeout=None,
                  socket_keepalive=False, socket_keepalive_options=None,
-                 retry_on_timeout=False, encoding='utf-8',
+                 socket_type=0, retry_on_timeout=False, encoding='utf-8',
                  encoding_errors='strict', decode_responses=False,
                  parser_class=DefaultParser, socket_read_size=65536):
         self.pid = os.getpid()
@@ -441,10 +472,9 @@ class Connection(object):
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
         self.socket_keepalive_options = socket_keepalive_options or {}
+        self.socket_type = socket_type
         self.retry_on_timeout = retry_on_timeout
-        self.encoding = encoding
-        self.encoding_errors = encoding_errors
-        self.decode_responses = decode_responses
+        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
@@ -500,7 +530,7 @@ class Connection(object):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        for res in socket.getaddrinfo(self.host, self.port, 0,
+        for res in socket.getaddrinfo(self.host, self.port, self.socket_type,
                                       socket.SOCK_STREAM):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -623,22 +653,6 @@ class Connection(object):
             raise response
         return response
 
-    def encode(self, value):
-        "Return a bytestring representation of the value"
-        if isinstance(value, Token):
-            return value.encoded_value
-        elif isinstance(value, bytes):
-            return value
-        elif isinstance(value, (int, long)):
-            value = b(str(value))
-        elif isinstance(value, float):
-            value = b(repr(value))
-        elif not isinstance(value, basestring):
-            value = unicode(value)
-        if isinstance(value, unicode):
-            value = value.encode(self.encoding, self.encoding_errors)
-        return value
-
     def pack_command(self, *args):
         "Pack a series of arguments into the Redis protocol"
         output = []
@@ -657,7 +671,7 @@ class Connection(object):
         buff = SYM_EMPTY.join(
             (SYM_STAR, b(str(len(args))), SYM_CRLF))
 
-        for arg in imap(self.encode, args):
+        for arg in imap(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values
             if len(buff) > 6000 or len(arg) > 6000:
@@ -746,9 +760,7 @@ class UnixDomainSocketConnection(Connection):
         self.password = password
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
-        self.encoding = encoding
-        self.encoding_errors = encoding_errors
-        self.decode_responses = decode_responses
+        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self._sock = None
         self._parser = parser_class(socket_read_size=socket_read_size)
         self._description_args = {
@@ -808,9 +820,14 @@ class ConnectionPool(object):
             unix://[:password]@/path/to/socket.sock?db=0
 
         Three URL schemes are supported:
-            redis:// creates a normal TCP socket connection
-            rediss:// creates a SSL wrapped TCP socket connection
-            unix:// creates a Unix Domain Socket connection
+
+        - ```redis://``
+          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
+          normal TCP socket connection
+        - ```rediss://``
+          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
+          SSL wrapped TCP socket connection
+        - ``unix://`` creates a Unix Domain Socket connection
 
         There are several ways to specify a database number. The parse function
         will return the first specified option:
@@ -924,8 +941,8 @@ class ConnectionPool(object):
         Create a connection pool. If max_connections is set, then this
         object raises redis.ConnectionError when the pool's limit is reached.
 
-        By default, TCP connections are created connection_class is specified.
-        Use redis.UnixDomainSocketConnection for unix sockets.
+        By default, TCP connections are created unless connection_class is
+        specified. Use redis.UnixDomainSocketConnection for unix sockets.
 
         Any additional keyword arguments are passed to the constructor of
         connection_class.
@@ -972,6 +989,15 @@ class ConnectionPool(object):
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection
+
+    def get_encoder(self):
+        "Return an encoder based on encoding settings"
+        kwargs = self.connection_kwargs
+        return Encoder(
+            encoding=kwargs.get('encoding', 'utf-8'),
+            encoding_errors=kwargs.get('encoding_errors', 'strict'),
+            decode_responses=kwargs.get('decode_responses', False)
+        )
 
     def make_connection(self):
         "Create a new connection"

@@ -44,7 +44,15 @@ setup(
     keywords=['Redis', 'key-value store'],
     license='MIT',
     packages=['redis'],
-    tests_require=['pytest>=2.5.0'],
+    extras_require={
+        'hiredis': [
+            "hiredis>=0.1.3",
+        ],
+    },
+    tests_require=[
+        'mock',
+        'pytest>=2.5.0',
+    ],
     cmdclass={'test': PyTest},
     classifiers=[
         'Development Status :: 5 - Production/Stable',
@@ -53,12 +61,13 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
+        'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
     ]
 )
